@@ -25,7 +25,6 @@ jobs:
             git curl wget zip cpio libncurses5-dev ca-certificates \
             python2 python2-minimal python3
           sudo ln -sf /usr/bin/python2 /usr/bin/python
-          sudo ln -sf /usr/bin/python2 /usr/bin/python2.7
 
       - name: Clone Proton Clang Toolchain
         run: |
