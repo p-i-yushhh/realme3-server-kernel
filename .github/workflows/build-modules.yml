@@ -1,4 +1,4 @@
-﻿name: Build USB Serial Kernel Modules
+name: Build USB Serial Kernel Modules
 
 on:
   push:
@@ -44,16 +44,20 @@ jobs:
           ./scripts/config --set-val CONFIG_USB_SERIAL_FTDI_SIO m
           ./scripts/config --set-val CONFIG_USB_ACM m
           
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          # Fix GCC 10+ multiple definition of yylloc in dtc
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c 2>/dev/null || true
+          
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" olddefconfig
           
           grep -E "CONFIG_USB_SERIAL|CONFIG_USB_ACM" .config
 
       - name: Compile Kernel Modules
         run: |
           cd linux-4.14
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/usb/serial modules
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/usb/class modules
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" modules_prepare
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" M=drivers/usb/serial modules
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" M=drivers/usb/class modules
 
       - name: Inspect and Package Modules
         run: |
