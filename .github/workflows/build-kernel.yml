@@ -1,0 +1,138 @@
+name: Build Realme 3 Server Kernel
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compile Kernel (Docker, BlueZ, ESP32 Serial)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            git curl wget zip cpio libncurses5-dev ca-certificates python3
+
+      - name: Clone Proton Clang Toolchain
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
+      - name: Clone Realme 3 (MT6771) Kernel Source
+        run: |
+          git clone --depth=1 -b Q https://github.com/sarthakroy2002/kernel_realme_RMX1821.git kernel
+
+      - name: Patch Defconfig for Docker, BlueZ & ESP32 OTG
+        run: |
+          DEFCONFIG="kernel/arch/arm64/configs/RMX1821_defconfig"
+          echo "Appending server configs to $DEFCONFIG..."
+          cat << 'EOF' >> "$DEFCONFIG"
+
+          # ==============================================
+          # Home Server Features: Docker / Namespaces
+          # ==============================================
+          CONFIG_NAMESPACES=y
+          CONFIG_UTS_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_USER_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_NET_NS=y
+          CONFIG_CGROUP_PIDS=y
+          CONFIG_CGROUP_DEVICE=y
+          CONFIG_VETH=y
+          CONFIG_BRIDGE=y
+          CONFIG_BRIDGE_NETFILTER=y
+          CONFIG_IP_NF_FILTER=y
+          CONFIG_IP_NF_TARGET_MASQUERADE=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+          CONFIG_OVERLAY_FS=y
+
+          # ==============================================
+          # Native Bluetooth: BlueZ & RFCOMM Sockets
+          # ==============================================
+          CONFIG_BT=y
+          CONFIG_BT_RFCOMM=y
+          CONFIG_BT_RFCOMM_TTY=y
+          CONFIG_BT_BNEP=y
+          CONFIG_BT_HIDP=y
+          CONFIG_BT_HCIUART=y
+          CONFIG_BT_HCIUART_H4=y
+          CONFIG_BT_HCIVHCI=y
+
+          # ==============================================
+          # ESP32 & Arduino USB-Serial Drivers (OTG)
+          # ==============================================
+          CONFIG_USB_SERIAL=y
+          CONFIG_USB_SERIAL_GENERIC=y
+          CONFIG_USB_SERIAL_CP210X=y
+          CONFIG_USB_SERIAL_CH341=y
+          CONFIG_USB_SERIAL_FTDI_SIO=y
+          CONFIG_USB_ACM=y
+
+          # ==============================================
+          # WireGuard Kernel VPN
+          # ==============================================
+          CONFIG_WIREGUARD=y
+          EOF
+
+      - name: Build Kernel (Image.gz-dtb)
+        run: |
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          make O=out ARCH=arm64 RMX1821_defconfig
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-Wno-error" \
+            Image.gz-dtb
+
+          ls -lh out/arch/arm64/boot/Image.gz-dtb
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
+          sed -i 's/device.name1=.*/device.name1=RMX1821/' anykernel/anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=RMX1825/' anykernel/anykernel.sh
+          sed -i 's/device.name3=.*/device.name3=RMX1822/' anykernel/anykernel.sh
+          sed -i 's/device.name4=.*/device.name4=RMX1823/' anykernel/anykernel.sh
+          sed -i 's/device.name5=.*/device.name5=RMX1827/' anykernel/anykernel.sh
+          sed -i 's/block=.*/block=\/dev\/block\/by-name\/boot;/' anykernel/anykernel.sh
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel/
+          cd anykernel
+          zip -r9 ../Realme3-Server-Kernel.zip * -x .git README.md *placeholder
+          cd ..
+          ls -lh Realme3-Server-Kernel.zip
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Realme3-Server-Kernel
+          path: Realme3-Server-Kernel.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: v1.0-${{ github.run_id }}
+          name: "Realme 3 Server Kernel (Docker + BlueZ + ESP32)"
+          body: |
+            ### Custom Linux Kernel for Realme 3 (RMX1821 / RMX1825 / MT6771)
+            - **Docker & Container Support:** `CONFIG_NAMESPACES`, `CONFIG_NET_NS`, `CONFIG_PID_NS`, `CONFIG_VETH`, bridge, iptables
+            - **Native Bluetooth BlueZ:** `CONFIG_BT`, `CONFIG_BT_RFCOMM`, `CONFIG_BT_HCIUART`
+            - **ESP32 & Arduino USB-Serial:** CP2102, CH340, FTDI, CDC-ACM
+            - **WireGuard VPN:** in-kernel support
+            - **Flashable via TWRP Recovery**
+          files: Realme3-Server-Kernel.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
