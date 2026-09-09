@@ -112,8 +112,8 @@ jobs:
           sed -i 's/device.name2=.*/device.name2=RMX1825/' anykernel/anykernel.sh
           sed -i 's/device.name3=.*/device.name3=RMX1822/' anykernel/anykernel.sh
           sed -i 's/device.name4=.*/device.name4=RMX1823/' anykernel/anykernel.sh
-          sed -i 's/device.name5=.*/device.name5=RMX1827/' anykernel/anykernel.sh
-          sed -i 's/block=.*/block=\/dev\/block\/by-name\/boot;/' anykernel/anykernel.sh
+          sed -i -E 's/(BLOCK|block)=.*/block=\/dev\/block\/by-name\/boot;/' anykernel/anykernel.sh
+          sed -i 's/kernel.string=.*/kernel.string=Realme 3 Server Kernel (Docker, BlueZ, ESP32)/' anykernel/anykernel.sh
           cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel/
           cd anykernel
           zip -r9 ../Realme3-Server-Kernel.zip * -x .git README.md *placeholder
