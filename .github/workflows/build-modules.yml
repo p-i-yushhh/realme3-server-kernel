@@ -1,0 +1,95 @@
+﻿name: Build USB Serial Kernel Modules
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-modules.yml'
+      - 'phone_running.config'
+  workflow_dispatch:
+
+jobs:
+  build-modules:
+    name: Build USB-Serial (.ko) Modules (4.14.142)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu git curl wget zip
+
+      - name: Clone Linux 4.14.142 Tree
+        run: |
+          git clone --depth 1 --branch v4.14.142 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-4.14
+
+      - name: Configure Kernel with Phone Config
+        run: |
+          cd linux-4.14
+          # Set exact EXTRAVERSION matching running uname -r: 4.14.142-MinatiKernel-Mystery+
+          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -MinatiKernel-Mystery+/' Makefile
+          cp ../phone_running.config .config
+          
+          # Enable USB serial drivers as modules
+          ./scripts/config --enable CONFIG_MODULES
+          ./scripts/config --set-val CONFIG_USB_SERIAL m
+          ./scripts/config --enable CONFIG_USB_SERIAL_GENERIC
+          ./scripts/config --set-val CONFIG_USB_SERIAL_CP210X m
+          ./scripts/config --set-val CONFIG_USB_SERIAL_CH341 m
+          ./scripts/config --set-val CONFIG_USB_SERIAL_FTDI_SIO m
+          ./scripts/config --set-val CONFIG_USB_ACM m
+          
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          
+          grep -E "CONFIG_USB_SERIAL|CONFIG_USB_ACM" .config
+
+      - name: Compile Kernel Modules
+        run: |
+          cd linux-4.14
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/usb/serial modules
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=drivers/usb/class modules
+
+      - name: Inspect and Package Modules
+        run: |
+          mkdir -p output_modules
+          find linux-4.14/drivers/usb/serial -name "*.ko" -exec cp -v {} output_modules/ \;
+          find linux-4.14/drivers/usb/class -name "*.ko" -exec cp -v {} output_modules/ \;
+          
+          cd output_modules
+          echo "=== Built Modules ==="
+          ls -lh
+          
+          echo "=== Vermagic Check ==="
+          modinfo ./cp210x.ko || strings ./cp210x.ko | grep vermagic
+          
+          zip -r ../usb-serial-modules-4.14.142.zip *.ko
+          cd ..
+
+      - name: Upload Modules Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usb-serial-modules
+          path: usb-serial-modules-4.14.142.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: modules-v1.0-${{ github.run_id }}
+          name: "USB-Serial Kernel Modules for Realme 3 (4.14.142)"
+          body: |
+            ### Loadable Kernel Modules for ESP32 & Arduino (MT6771 / 4.14.142)
+            - `cp210x.ko` (ESP32 USB-UART Bridge)
+            - `ch341.ko` (CH340 / ESP32 / Arduino)
+            - `ftdi_sio.ko` (FTDI FT232R)
+            - `usbserial.ko` (Core USB Serial driver)
+            - `cdc-acm.ko` (Standard USB Serial Modem)
+          files: usb-serial-modules-4.14.142.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
