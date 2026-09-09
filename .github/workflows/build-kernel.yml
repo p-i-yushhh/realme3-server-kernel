@@ -9,17 +9,23 @@ jobs:
   build:
     name: Compile Kernel (Docker, BlueZ, ESP32 Serial)
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Install Build Dependencies
         run: |
+          sudo add-apt-repository universe -y
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev \
             clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            git curl wget zip cpio libncurses5-dev ca-certificates python3
+            git curl wget zip cpio libncurses5-dev ca-certificates \
+            python2 python2-minimal python3
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          sudo ln -sf /usr/bin/python2 /usr/bin/python2.7
 
       - name: Clone Proton Clang Toolchain
         run: |
@@ -86,6 +92,7 @@ jobs:
       - name: Build Kernel (Image.gz-dtb)
         run: |
           cd kernel
+          chmod -R +x scripts/ tools/ 2>/dev/null || true
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           make O=out ARCH=arm64 RMX1821_defconfig
           make -j$(nproc --all) O=out \
